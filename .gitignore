@@ -1,0 +1,25 @@
+# v0 sandbox internal files
+__v0_runtime_loader.js
+__v0_devtools.tsx
+__v0_jsx-dev-runtime.ts
+.snowflake/
+.v0-trash/
+.vercel/
+
+# Environment variables
+.env*.local
+
+# Common ignores
+node_modules
+.next/
+.DS_Store
+
+# Build cache
+*.tsbuildinfo
+
+# Local planning docs (kept out of the repo — SQL migrations under docs/sql/ ARE tracked)
+docs/PRD.md
+docs/PRD-Executive-Summary.md
+docs/PRD-Executive-Summary.pdf
+docs/database-design.html
+config.bat

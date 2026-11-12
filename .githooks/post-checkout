@@ -1,0 +1,25 @@
+#!/bin/sh
+#
+# Runs after `git checkout` / `git switch` (and after a clone). Same purpose as
+# post-merge: flag a tampered build config the moment it lands in the working
+# tree, before anyone runs the app.
+#
+# Args: $1 = previous HEAD, $2 = new HEAD, $3 = 1 if branch checkout, 0 if file
+# checkout. Skip file checkouts — they can't change the branch state meaningfully
+# and would make this noisy.
+#
+# Installed via: git config core.hooksPath .githooks
+
+[ "$3" = "1" ] || exit 0
+[ -f scripts/verify-build-config.mjs ] || exit 0
+
+command -v node >/dev/null 2>&1 || exit 0
+
+if ! node scripts/verify-build-config.mjs; then
+  echo "" >&2
+  echo ">>> The branch you just checked out has a tampered build config. <<<" >&2
+  echo ">>> Do not run the app; see the report above. <<<" >&2
+  echo "" >&2
+fi
+
+exit 0

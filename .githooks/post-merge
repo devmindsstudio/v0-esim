@@ -1,0 +1,35 @@
+#!/bin/sh
+#
+# Runs after `git pull` / `git merge`. If the merge just brought in a tampered
+# build config, say so NOW — loudly — rather than letting you discover it when
+# `next dev` executes the payload.
+#
+# This cannot block the merge (it runs after), but nothing has executed yet:
+# the config only runs when next reads it, and `npm run dev` / `npm run build`
+# are gated by the same check via predev/prebuild.
+#
+# Installed via: git config core.hooksPath .githooks
+
+[ -f scripts/verify-build-config.mjs ] || exit 0
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "post-merge: node not on PATH, skipping build-config check" >&2
+  exit 0
+fi
+
+if ! node scripts/verify-build-config.mjs; then
+  cat >&2 <<'EOF'
+
+>>> The merge you just pulled contains a tampered build config. <<<
+
+DO NOT run `npm run dev` or `npm run build` until this is resolved (they are
+blocked anyway by the predev/prebuild guard).
+
+This has happened three times via force-pushed history on origin/main. If you
+see it again, the pushing credential is still live — revoke it on GitHub and
+enable a ruleset blocking force-pushes to main.
+
+EOF
+fi
+
+exit 0

@@ -1,0 +1,93 @@
+#!/bin/sh
+#
+# Blocks the class of supply-chain injection found on 2026-08-08, where an
+# obfuscated RCE loader was hidden in postcss.config.mjs on the
+# "export default config;" line behind ~1000 spaces. It survived four commits
+# because nobody scrolled right.
+#
+# Installed via: git config core.hooksPath .githooks
+# Emergency bypass (justify it): git commit --no-verify
+#
+# Checks STAGED content, not the working tree, so it sees what is really
+# being committed.
+
+fail=0
+note() { printf '\n\033[31mBLOCKED\033[0m %s\n' "$1" >&2; fail=1; }
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+# Longest line length in a staged blob (0 for binary/unreadable).
+maxline() {
+  git show ":$1" 2>/dev/null | awk '{ if (length($0) > n) n = length($0) } END { print n+0 }'
+}
+staged_has() {
+  git show ":$1" 2>/dev/null | grep -qF "$2"
+}
+
+for f in $staged; do
+  # Skip anything git considers binary.
+  if git diff --cached --numstat -- "$f" | grep -q '^-'; then
+    continue
+  fi
+
+  # Skip the security tooling itself: these files necessarily contain the
+  # indicators they defend against, so scanning them always trips every rule.
+  # Changes here are a code-review concern, not something a hook can police.
+  case "$f" in
+    .githooks/*|scripts/verify-build-config.mjs) continue ;;
+  esac
+
+  # ---- Known indicators of the 2026-08-08 campaign, checked everywhere ----
+  for ioc in 'A9-1322-2' '0xa322E5f3D311D3080e6f0121063e9aDC2490Ef1a' '166.88.134.62' 'eth.blockscout.com/api'; do
+    if staged_has "$f" "$ioc"; then
+      note "$f contains a known malware indicator: $ioc"
+    fi
+  done
+
+  # Long runs of \uXXXX escapes are the obfuscation signature. Real source
+  # almost never chains 8+ of them; the payload had 516.
+  if git show ":$f" 2>/dev/null | grep -qE '(\\u[0-9a-fA-F]{4}){8,}'; then
+    note "$f has 8+ chained \\uXXXX escapes — obfuscated string hiding."
+  fi
+
+  # ---- Build-config files get the strict treatment ----
+  # These execute during `next dev` / `next build`, so anything hidden here runs
+  # on every build. They are also small and hand-written, so these limits are
+  # generous in practice.
+  case "$f" in
+    *.config.js|*.config.mjs|*.config.cjs|*.config.ts|*.config.mts|*.config.cts)
+      len=$(maxline "$f")
+      if [ "$len" -gt 500 ]; then
+        note "$f has a ${len}-char line (limit 500). Payloads hide past the right edge."
+      fi
+      for bad in 'child_process' 'createRequire' 'eval(' 'new Function' 'Function(' '.spawn' 'execSync'; do
+        if staged_has "$f" "$bad"; then
+          note "$f contains '$bad'. A build config has no business executing code."
+        fi
+      done
+      size=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
+      if [ "$size" -gt 4096 ]; then
+        note "$f is ${size} bytes (limit 4096). Build configs should be tiny."
+      fi
+      ;;
+  esac
+done
+
+if [ "$fail" -ne 0 ]; then
+  cat >&2 <<'EOF'
+
+Commit rejected by .githooks/pre-commit.
+
+Inspect the flagged file before doing anything else. To see content hiding past
+the right edge of your editor:
+
+    awk '{ printf "%4d len=%6d\n", NR, length($0) }' <file> | sort -k2 -t= -rn | head
+
+If this is a false positive, commit with --no-verify and please loosen the rule
+in .githooks/pre-commit so the next person is not blocked too.
+EOF
+  exit 1
+fi
+
+exit 0
